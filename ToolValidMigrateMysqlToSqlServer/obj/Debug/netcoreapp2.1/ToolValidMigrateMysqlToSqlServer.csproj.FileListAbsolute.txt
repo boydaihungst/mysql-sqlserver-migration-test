@@ -1,0 +1,4 @@
+C:\Users\Thuy\source\repos\ToolValidMigrateMysqlToSqlServer\ToolValidMigrateMysqlToSqlServer\obj\Debug\netcoreapp2.1\ToolValidMigrateMysqlToSqlServer.csprojAssemblyReference.cache
+C:\Users\Thuy\source\repos\ToolValidMigrateMysqlToSqlServer\ToolValidMigrateMysqlToSqlServer\obj\Debug\netcoreapp2.1\ToolValidMigrateMysqlToSqlServer.csproj.CoreCompileInputs.cache
+C:\Users\Thuy\source\repos\ToolValidMigrateMysqlToSqlServer\ToolValidMigrateMysqlToSqlServer\obj\Debug\netcoreapp2.1\ToolValidMigrateMysqlToSqlServer.AssemblyInfoInputs.cache
+C:\Users\Thuy\source\repos\ToolValidMigrateMysqlToSqlServer\ToolValidMigrateMysqlToSqlServer\obj\Debug\netcoreapp2.1\ToolValidMigrateMysqlToSqlServer.AssemblyInfo.cs
