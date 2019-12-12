@@ -1,8 +1,6 @@
 using System;
 using System.Data;
 using Microsoft.VisualBasic.FileIO;
-using ConsoleApp1.Model;
-using System.Reflection;
 using System.Linq;
 using MySql.Data.MySqlClient;
 using Db.SqlConn;
@@ -13,9 +11,13 @@ using System.Data.SqlClient;
 
 namespace ConsoleApp1
 {
+    // TODO: Test case cac list data type
+    // Split code
+    // Construct lai connect db
     class Program
     {
         private static string csvPath = @"";
+        private static string MysqlDb = @"dms";
         private static List<string> tblNameList = new List<string>();
 
         private static List<string> listInt = new List<string> { "tinyint", "int", "smallint", "mediumint", "bigint" };
@@ -26,10 +28,10 @@ namespace ConsoleApp1
         static void Main(string[] args)
         {
             Console.WriteLine("Getting Connection ...");
-            MySqlConnection conn = DBUtils.GetMySqlConnection();
-
+            MySqlConnection conn = null;
             try
             {
+                conn = DBUtils.GetMySqlConnection();
                 Console.WriteLine("Openning Connection ...");
 
                 conn.Open();
@@ -55,7 +57,7 @@ namespace ConsoleApp1
                     }
                 }
                 // Get list table
-                sql = "show tables";
+                sql = $"SELECT table_name as TABLE_NAME FROM information_schema.tables WHERE table_schema = '{MysqlDb}'";
                 cmd.CommandText = sql;
                 using (DbDataReader reader = cmd.ExecuteReader())
                 {
@@ -64,7 +66,7 @@ namespace ConsoleApp1
 
                         while (reader.Read())
                         {
-                            int tableIndex = reader.GetOrdinal("Tables_in_dms");
+                            int tableIndex = reader.GetOrdinal("TABLE_NAME");
                             string tableName = reader.GetString(tableIndex);
                             if (tableName != null)
                             {
@@ -76,9 +78,9 @@ namespace ConsoleApp1
                 foreach (var item in tblNameList)
                 {
                     string filePath = $@"{csvPath}{item}.csv";
-                    removeFile(filePath);
+                    RemoveFile(filePath);
                     // Generate csv
-                    sql = "use dms;\r\n" +
+                    sql = $"use {MysqlDb};\r\n" +
                             "set session group_concat_max_len = 1000000;\r\n" +
                             "SET @FieldList = (SELECT GROUP_CONCAT(CONCAT(\"IFNULL(\",COLUMN_NAME,\", '') AS \", COLUMN_NAME)) as GroupName\r\n" +
                             "from INFORMATION_SCHEMA.COLUMNS\r\n" +
@@ -95,7 +97,6 @@ namespace ConsoleApp1
                             "SET @FOLDER = REPLACE(@@secure_file_priv,'\\\\','\\/');\r\n" +
                             $"SET @PREFIX = '{item}';\r\n" +
                             "SET @EXT    = '.csv';\r\n" +
-                            "\r\n" +
                             "SET @CMD = CONCAT(\"\r\n" +
                             "SELECT \",@FieldListStr,\"\r\n" +
                             "UNION ALL\r\n" +
@@ -104,14 +105,12 @@ namespace ConsoleApp1
                             $"SELECT \",@FieldList,\" FROM {item} INTO OUTFILE '\",@FOLDER,@PREFIX,@EXT,\r\n" +
                             "                   \" 'FIELDS ENCLOSED BY '\\\"' TERMINATED BY ';' ESCAPED BY ''\",\r\n" +
                             "                   \" LINES TERMINATED BY '\\r\\n'\");\r\n" +
-                            "\r\n" +
                             "select @CMD;\r\n" +
                             "PREPARE statement FROM @CMD;\r\n" +
-                            "\r\n" +
                             "EXECUTE statement;\r\n";
                     cmd.CommandText = sql;
                     cmd.ExecuteNonQuery();
-                    Console.WriteLine($"Valid table {item}....");
+                    Console.WriteLine($"Checking table {item}....");
                     bool isDataOk = ValidDataFromCsvAndSqlServer(filePath, item);
                     if (!isDataOk) break;
                 }
@@ -121,11 +120,22 @@ namespace ConsoleApp1
             catch (Exception e)
             {
                 Console.WriteLine("Error: " + e);
+            } finally
+            {
+                if(conn !=null && conn.State != ConnectionState.Closed )
+                {
+                    conn.Close();
+                    conn.Dispose();
+                }
             }
             Console.ReadLine();
         }
+        private static void CreateDbConnection()
+        {
 
-        private static void removeFile(string filePath)
+        }
+
+        private static void RemoveFile(string filePath)
         {
             if (File.Exists(filePath))
             {
@@ -192,7 +202,7 @@ namespace ConsoleApp1
             conn.Open();
 
             // Prepare sql statement
-            string sql = $"SELECT *  FROM [dms].[{tableName}]";
+            string sql = $"SELECT *  FROM [{MysqlDb}].[{tableName}]";
             if (csvData.Rows.Count > 0)
             {
                 sql += " WHERE ";

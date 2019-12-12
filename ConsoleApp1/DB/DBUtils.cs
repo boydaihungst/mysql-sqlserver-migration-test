@@ -10,7 +10,7 @@ namespace Db.SqlConn
         {
             string host = "127.0.0.1";
             int port = 3306;
-            string database = "dms";
+            string database = "FEDMS";
             string username = "boydaihungst";
             string password = "Anhhoang123";
             return DBMySQLUtils.GetDBConnection(host, port, database, username, password);
@@ -20,7 +20,7 @@ namespace Db.SqlConn
         {
             string datasource = @"DESKTOP-DE43FI1";
         
-            string database = "dms";
+            string database = "FEDMS";
             string username = "";
             string password = "";
             return DBSqlServerUtils.GetDBConnection(datasource, database, username, password);
