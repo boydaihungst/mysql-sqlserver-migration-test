@@ -20,8 +20,10 @@ namespace ConsoleApp1
     class Program
     {
         private static string csvPath = @"";
+        private static string inProgressFile = @"";
         private static List<string> tblNameList = new List<string>();
-
+        private static MySqlConnection conn = null;
+        private static SqlConnection connSqlSv = null;
         private static List<string> listInt = new List<string> { "tinyint", "int", "smallint", "mediumint", "bigint" };
         private static List<string> listDecimal = new List<string> { "float", "double" };
         private static List<string> listDate = new List<string> { "datetime", "date", "timestamp" };
@@ -29,35 +31,38 @@ namespace ConsoleApp1
 
         static void Main(string[] args)
         {
-            MySqlConnection conn = null;
             try
             {
                 conn = DBMySQLUtils.GetDBConnection();
-                Console.Write("Open Connection... ");
+                Console.Write("Open MySql Connection... ");
                 conn.Open();
+                Console.WriteLine("OK");
+
+                Console.Write("Open Sql Server Connection... ");
+                connSqlSv = DBSqlServerUtils.GetDBConnection();
+                connSqlSv.Open();
                 Console.WriteLine("OK");
                 csvPath = DBMySQLUtils.GetExportFolder(conn);
                 // Get list table
                 tblNameList = DBMySQLUtils.GetListTable(conn);
                 foreach (var tblName in tblNameList)
                 {
-                    string filePath = $@"{csvPath}{tblName}.csv";
-                    RemoveFile(filePath);
+                    inProgressFile = $@"{csvPath}{tblName}.csv";
+                    RemoveFile(inProgressFile);
                     // Generate csv
                     DBMySQLUtils.ExportCsv(conn, tblName);
                     Console.Write($"Checking table {tblName}... ");
-                    bool isDataOk = ValidDataFromCsvAndSqlServer(filePath, tblName);
+                    bool isDataOk = ValidDataFromCsvAndSqlServer(inProgressFile, tblName);
                     if (!isDataOk) break;
                     Console.WriteLine("OK");
+                    RemoveFile(inProgressFile);
                 }
-
-                Console.WriteLine("Done");
+                Console.WriteLine("Everything OK");
             }
             catch (Exception e)
             {
-                if (e.GetType() == typeof(InvalidCompareException))
-                    Console.WriteLine(e.Message);
-                else Console.WriteLine(e);
+                RemoveFile(inProgressFile);
+                Console.WriteLine(e.Message);
             }
             finally
             {
@@ -65,6 +70,11 @@ namespace ConsoleApp1
                 {
                     conn.Close();
                     conn.Dispose();
+                }
+                if (connSqlSv != null && connSqlSv.State != ConnectionState.Closed)
+                {
+                    connSqlSv.Close();
+                    connSqlSv.Dispose();
                 }
             }
             Console.ReadLine();
@@ -74,14 +84,19 @@ namespace ConsoleApp1
         {
             if (File.Exists(filePath))
             {
-                File.Delete(filePath);
+                FileAttributes fileAttr = File.GetAttributes(filePath);
+                if (!fileAttr.HasFlag(FileAttributes.Directory))
+                {
+                    File.SetAttributes(filePath, FileAttributes.Normal);
+                    File.Delete(filePath);
+                }
             }
         }
         private static void ValidateHeaderField(DataTable csvData, DataTable DBServer, string tableName)
         {
             if (csvData.Columns.Count != DBServer.Columns.Count)
             {
-                var msg = "Column size not equal\n";
+                var msg = "Error: Column size not equal";
                 throw new InvalidCompareException(msg);
             }
             // Check header name equal
@@ -90,18 +105,21 @@ namespace ConsoleApp1
                 bool isHeaderNameNotEqual = DBServer.Columns.Contains(col.ToString());
                 if (!isHeaderNameNotEqual)
                 {
-                    var msg = "Error: Column not found\n";
-                    msg += string.Format("|{0,5}|{1,5}|{2,5}|\n",
-                       "Error Column", col.ToString(), "not found");
+                    var msg = $"Error: Invalid Column Name: {col.ToString()}";
                     throw new InvalidCompareException(msg);
                 }
             }
         }
-        private static void ValidateData(DataTable csvData, DataTable DBServer, string tableName)
+        private static void ValidateData(
+            DataTable csvData,
+            DataTable DBServer,
+            string tableName,
+            int csvMaxLength,
+            int sqlServerMaxLength)
         {
-            if (csvData.Rows.Count != DBServer.Rows.Count)
+            if (csvMaxLength != sqlServerMaxLength)
             {
-                var msg = "Row size not equal\n";
+                var msg = "Error: Row size not equal";
                 throw new InvalidCompareException(msg);
             }
             // Check data value
@@ -112,7 +130,9 @@ namespace ConsoleApp1
                     bool isDataOk = false;
                     foreach (DataRow rowDb in DBServer.Rows)
                     {
-                        if (rowDb[col.ColumnName].ToString() == rowCsv[col.ColumnName].ToString())
+                        var array1 = rowCsv.ItemArray;
+                        var array2 = rowDb.ItemArray;
+                        if (array1.SequenceEqual(array2))
                         {
                             isDataOk = true;
                         }
@@ -120,93 +140,33 @@ namespace ConsoleApp1
 
                     if (!isDataOk)
                     {
-                        var errorRow = rowCsv[col.ColumnName].ToString().Substring(0, 10);
-                        if (rowCsv[col.ColumnName].ToString().Length > 10)
-                        {
-                            errorRow += "...";
-                        }
-                        var msg = "Error: Row not equal\n";
-                        msg += string.Format("|{0,5}|{1,5}|{2,5}|\n",
-                           "Error Row", errorRow, "not found");
+                        var msg = "Error: Invalid Row data";
                         throw new InvalidCompareException(msg);
                     }
                 }
             }
         }
-        private static bool CompareDataTable(DataTable csvData, DataTable DBServer, string tableName)
+        private static bool CompareDataTable(DataTable csvData,
+            DataTable DBServer,
+            string tableName,
+            int csvMaxLength,
+            int sqlServerMaxLength)
         {
             ValidateHeaderField(csvData, DBServer, tableName);
-            ValidateData(csvData, DBServer, tableName);
+            ValidateData(csvData, DBServer, tableName, csvMaxLength, sqlServerMaxLength);
             return true;
-        }
-
-        private static DataTable GetDataTableFromSqlServer(string tableName, DataTable csvData)
-        {
-            SqlConnection conn = DBSqlServerUtils.GetDBConnection();
-            conn.Open();
-
-            // Prepare sql statement
-            string sql = $"SELECT *  FROM [{ConfigurationManager.AppSettings["SqlServerSchema"].ToString()}].[{tableName}]";
-            if (csvData.Rows.Count > 0)
-            {
-                sql += " WHERE ";
-            }
-            var listParams = new List<SqlParameter>();
-
-            for (int j = 0; j < csvData.Rows.Count; j++)
-            {
-                sql += " ( ";
-                for (int i = 0; i < csvData.Columns.Count; i++)
-                {
-                    string colName = csvData.Columns[i].ToString();
-                    sql += $" {colName}";
-                    if (csvData.Rows[j][colName] == DBNull.Value)
-                    {
-                        sql += $" IS NULL";
-                    }
-                    else
-                    {
-                        sql += $" = @{colName}{j} ";
-                        SqlParameter param = new SqlParameter
-                        {
-                            ParameterName = $"@{colName}{j}",
-                            Value = csvData.Rows[j][colName]
-                        };
-                        var test = param.Value;
-                        listParams.Add(param);
-                    }
-                    if (i != csvData.Columns.Count - 1)
-                    {
-                        sql += " AND ";
-                    }
-                }
-                sql += j != csvData.Rows.Count - 1 ? " ) OR " : " ) ";
-            }
-            SqlCommand cmd = new SqlCommand(sql, conn);
-            foreach (var p in listParams)
-            {
-                cmd.Parameters.Add(p);
-            }
-            DataTable dataTable = new DataTable();
-
-            // Load sql data to datatable
-            using (DbDataReader reader = cmd.ExecuteReader())
-            {
-                dataTable.Load(reader);
-            }
-            cmd.Dispose();
-            conn.Close();
-            return dataTable;
         }
 
         private static bool ValidDataFromCsvAndSqlServer(string csv_file_path, string tableName)
         {
-            int bashSize = 10;
+            int bashSize =  int.Parse(ConfigurationManager.AppSettings["BashSize"]);
             bool csvHasDataRow = false;
             DataTable csvData = new DataTable();
 
             using (var csvReader = new TextFieldParser(csv_file_path))
             {
+                var csvMaxLength = File.ReadAllLines(csv_file_path).Length - 2;
+                var sqlServerMaxLength = DBSqlServerUtils.CountRowSqlServer(connSqlSv,tableName);
                 csvReader.SetDelimiters(new string[] { ";" });
                 csvReader.HasFieldsEnclosedInQuotes = true;
                 //read column names
@@ -280,8 +240,8 @@ namespace ConsoleApp1
                     // Compare with sql server
                     if (csvData.Rows.Count == bashSize || csvReader.EndOfData)
                     {
-                        DataTable DBServer = GetDataTableFromSqlServer(tableName, csvData);
-                        bool isDataOk = CompareDataTable(csvData, DBServer, tableName);
+                        DataTable DBServer = DBSqlServerUtils.GetDataTableFromSqlServer(connSqlSv,tableName, csvData);
+                        bool isDataOk = CompareDataTable(csvData, DBServer, tableName, csvMaxLength, sqlServerMaxLength);
                         if (!isDataOk) return false;
                         csvData.Rows.Clear();
                     }
@@ -290,8 +250,8 @@ namespace ConsoleApp1
                 // Compare with sql server
                 if (!csvHasDataRow)
                 {
-                    DataTable DBServer = GetDataTableFromSqlServer(tableName, csvData);
-                    bool isDataOk = CompareDataTable(csvData, DBServer, tableName);
+                    DataTable DBServer = DBSqlServerUtils.GetDataTableFromSqlServer(connSqlSv,tableName, csvData);
+                    bool isDataOk = CompareDataTable(csvData, DBServer, tableName, csvMaxLength, sqlServerMaxLength);
                     if (!isDataOk) return false;
                     csvData.Rows.Clear();
                 }
