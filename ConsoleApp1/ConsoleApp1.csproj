@@ -38,6 +38,7 @@
       <HintPath>..\..\..\..\..\..\Program Files (x86)\MySQL\Connector NET 8.0\Assemblies\v4.5.2\MySql.Data.dll</HintPath>
     </Reference>
     <Reference Include="System" />
+    <Reference Include="System.Configuration" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -49,8 +50,8 @@
   <ItemGroup>
     <Compile Include="DB\DBMySqlUtils.cs" />
     <Compile Include="DB\DBSqlServerUtils.cs" />
-    <Compile Include="DB\DBUtils.cs" />
-    <Compile Include="Model\Class1.cs" />
+    <Compile Include="Model\InvalidCompareException.cs" />
+    <Compile Include="Model\MetaData.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
