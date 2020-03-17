@@ -2,261 +2,632 @@ using ConsoleApp1.DB;
 using ConsoleApp1.Model;
 using Db.SqlConn;
 using Microsoft.VisualBasic.FileIO;
-using MySql.Data.MySqlClient;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
-using System.Data.Common;
 using System.Data.SqlClient;
+using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ConsoleApp1
 {
-    // TODO: Test case cac list data type
-    // Split code
-    // Construct lai connect db
     class Program
     {
-        private static string csvPath = @"";
-        private static string inProgressFile = @"";
-        private static List<string> tblNameList = new List<string>();
-        private static MySqlConnection conn = null;
-        private static SqlConnection connSqlSv = null;
         private static List<string> listInt = new List<string> { "tinyint", "int", "smallint", "mediumint", "bigint" };
-        private static List<string> listDecimal = new List<string> { "float", "double" };
+        private static List<string> listDecimal = new List<string> { "float", "double", "decimal" };
         private static List<string> listDate = new List<string> { "datetime", "date", "timestamp" };
         private static List<string> listStr = new List<string> { "char", "varchar", "binary", "varbiary", "blob", "text", "enum", "set" };
+        private static int tableWidth = 100;
 
         static void Main(string[] args)
         {
-            try
-            {
-                conn = DBMySQLUtils.GetDBConnection();
-                Console.Write("Open MySql Connection... ");
-                conn.Open();
-                Console.WriteLine("OK");
-
-                Console.Write("Open Sql Server Connection... ");
-                connSqlSv = DBSqlServerUtils.GetDBConnection();
-                connSqlSv.Open();
-                Console.WriteLine("OK");
-                csvPath = DBMySQLUtils.GetExportFolder(conn);
-                // Get list table
-                tblNameList = DBMySQLUtils.GetListTable(conn);
-                foreach (var tblName in tblNameList)
-                {
-                    inProgressFile = $@"{csvPath}{tblName}.csv";
-                    RemoveFile(inProgressFile);
-                    // Generate csv
-                    DBMySQLUtils.ExportCsv(conn, tblName);
-                    Console.Write($"Checking table {tblName}... ");
-                    bool isDataOk = ValidDataFromCsvAndSqlServer(inProgressFile, tblName);
-                    if (!isDataOk) break;
-                    Console.WriteLine("OK");
-                    RemoveFile(inProgressFile);
-                }
-                Console.WriteLine("Everything OK");
-            }
-            catch (Exception e)
-            {
-                RemoveFile(inProgressFile);
-                Console.WriteLine(e.Message);
-            }
-            finally
-            {
-                if (conn != null && conn.State != ConnectionState.Closed)
-                {
-                    conn.Close();
-                    conn.Dispose();
-                }
-                if (connSqlSv != null && connSqlSv.State != ConnectionState.Closed)
-                {
-                    connSqlSv.Close();
-                    connSqlSv.Dispose();
-                }
-            }
-            Console.ReadLine();
+            Console.OutputEncoding = Encoding.UTF8;
+            MainMenu();
         }
-
-        private static void RemoveFile(string filePath)
+        private static bool ValidateTableHeader(DataTable mySqlDatatable, DataTable sqlServerDatatable, TableDB tbl)
         {
-            if (File.Exists(filePath))
+            var isOk = true;
+            var differenceheaders = new List<string>();
+            foreach (DataColumn col in mySqlDatatable.Columns)
             {
-                FileAttributes fileAttr = File.GetAttributes(filePath);
-                if (!fileAttr.HasFlag(FileAttributes.Directory))
-                {
-                    File.SetAttributes(filePath, FileAttributes.Normal);
-                    File.Delete(filePath);
-                }
-            }
-        }
-        private static void ValidateHeaderField(DataTable csvData, DataTable DBServer, string tableName)
-        {
-            if (csvData.Columns.Count != DBServer.Columns.Count)
-            {
-                var msg = "Error: Column size not equal";
-                throw new InvalidCompareException(msg);
-            }
-            // Check header name equal
-            foreach (DataColumn col in csvData.Columns)
-            {
-                bool isHeaderNameNotEqual = DBServer.Columns.Contains(col.ToString());
+                bool isHeaderNameNotEqual = sqlServerDatatable.Columns.Contains(col.ToString());
                 if (!isHeaderNameNotEqual)
                 {
-                    var msg = $"Error: Invalid Column Name: {col.ToString()}";
-                    throw new InvalidCompareException(msg);
+                    differenceheaders.Add(col.ToString());
+                    isOk = false;
                 }
             }
-        }
-        private static void ValidateData(
-            DataTable csvData,
-            DataTable DBServer,
-            string tableName,
-            int csvMaxLength,
-            int sqlServerMaxLength)
-        {
-            if (csvMaxLength != sqlServerMaxLength)
+            if (differenceheaders.Any())
             {
-                var msg = "Error: Row size not equal";
-                throw new InvalidCompareException(msg);
+                tbl.Problems.Add($"Missing table header: {string.Join(",", differenceheaders.Select(row => row))}");
             }
-            // Check data value
-            foreach (DataRow rowCsv in csvData.Rows)
+            return isOk;
+        }
+        private static bool ValidateTableData(DataTable mySqlDatatable, DataTable sqlServerDatatable, TableDB tbl)
+        {
+            var isOk = true;
+            //foreach (DataRow row in mySqlDatatable.Rows)
+            for (int i = 0; i < mySqlDatatable.Rows.Count; i++)
             {
-                foreach (DataColumn col in csvData.Columns)
+                try
                 {
-                    bool isDataOk = false;
-                    foreach (DataRow rowDb in DBServer.Rows)
+                    foreach (DataColumn col in mySqlDatatable.Columns)
                     {
-                        var array1 = rowCsv.ItemArray;
-                        var array2 = rowDb.ItemArray;
-                        if (array1.SequenceEqual(array2))
+                        var mySqlCellVal = mySqlDatatable.Rows[i][col.ColumnName].ToString();
+                        var sqlServerCellVal = sqlServerDatatable.Rows[i][col.ColumnName].ToString();
+                        if (mySqlCellVal != sqlServerCellVal)
                         {
-                            isDataOk = true;
+                            throw new InvalidCompareException();
                         }
                     }
-
-                    if (!isDataOk)
-                    {
-                        var msg = "Error: Invalid Row data";
-                        throw new InvalidCompareException(msg);
-                    }
+                }
+                catch (Exception)
+                {
+                    tbl.Problems.Add($"Data is not matching");
+                    tbl.Problems = tbl.Problems.Distinct().ToList();
+                    isOk = false;
                 }
             }
+            return isOk;
         }
-        private static bool CompareDataTable(DataTable csvData,
-            DataTable DBServer,
-            string tableName,
-            int csvMaxLength,
-            int sqlServerMaxLength)
+        // excel
+        private static bool CompareTableMySqlAndSqlServer(DataTable mySqlDatatable, DataTable sqlServerDatatable, TableDB tbl)
         {
-            ValidateHeaderField(csvData, DBServer, tableName);
-            ValidateData(csvData, DBServer, tableName, csvMaxLength, sqlServerMaxLength);
-            return true;
+            var dataset1 = ConvertValueType(mySqlDatatable);
+            var dataset2 = ConvertValueType(sqlServerDatatable);
+            var isOk = ValidateTableHeader(dataset1, dataset2, tbl);
+            if (!isOk) return isOk;
+            isOk = ValidateTableData(dataset1, dataset2, tbl);
+            return isOk;
         }
-
-        private static bool ValidDataFromCsvAndSqlServer(string csv_file_path, string tableName)
+        // excel
+        private static bool ValidDataFromCsvAndSqlServer(string tableDataCsvPath, string tableMetadataCsvPath, TableDB tbl)
         {
-            int bashSize =  int.Parse(ConfigurationManager.AppSettings["BashSize"]);
-            bool csvHasDataRow = false;
+            int bashSize = int.Parse(ConfigurationManager.AppSettings["BashSize"]);
             DataTable csvData = new DataTable();
-
-            using (var csvReader = new TextFieldParser(csv_file_path))
+            //read column names
+            List<string> colNames = new List<string>();
+            //read column data type
+            List<string> colDataTypes = new List<string>();
+            using (var tblMetadataCsvReader = new TextFieldParser(tableMetadataCsvPath, Encoding.Default, true))
             {
-                var csvMaxLength = File.ReadAllLines(csv_file_path).Length - 2;
-                var sqlServerMaxLength = DBSqlServerUtils.CountRowSqlServer(connSqlSv,tableName);
+                tblMetadataCsvReader.SetDelimiters(new string[] { ";" });
+                tblMetadataCsvReader.HasFieldsEnclosedInQuotes = true;
+                tblMetadataCsvReader.TrimWhiteSpace = false;
+                while (!tblMetadataCsvReader.EndOfData)
+                {
+                    List<string> cellData = tblMetadataCsvReader.ReadFields().ToList();
+                    if (cellData.Count() < 2)
+                    {
+                        tbl.Problems.Add($"Table {tbl.TableName} metadata corrupted");
+                        return false;
+                    }
+                    colNames.Add(cellData[0]);
+                    colDataTypes.Add(cellData[1]);
+                }
+            }
+            //read row data
+            using (var csvReader = new TextFieldParser(tableDataCsvPath, Encoding.Default, true))
+            {
                 csvReader.SetDelimiters(new string[] { ";" });
                 csvReader.HasFieldsEnclosedInQuotes = true;
-                //read column names
-                string[] colFields = csvReader.ReadFields();
-                //read column data type
-                string[] colTypes = csvReader.ReadFields();
-
-                for (int i = 0; i < colFields.Length; i++)
+                csvReader.TrimWhiteSpace = false;
+                // Set column datatype
+                for (int i = 0; i < colNames.Count(); i++)
                 {
                     Type colType = typeof(string);
-                    if (listInt.Contains(colTypes[i], StringComparer.OrdinalIgnoreCase))
+                    if (listInt.Contains(colDataTypes[i], StringComparer.OrdinalIgnoreCase))
                     {
                         colType = typeof(int);
                     }
-                    else if (listDecimal.Contains(colTypes[i], StringComparer.OrdinalIgnoreCase))
+                    else if (listDecimal.Contains(colDataTypes[i], StringComparer.OrdinalIgnoreCase))
                     {
                         colType = typeof(decimal);
                     }
-                    else if (listDate.Contains(colTypes[i], StringComparer.OrdinalIgnoreCase))
+                    else if (listDate.Contains(colDataTypes[i], StringComparer.OrdinalIgnoreCase))
                     {
                         colType = typeof(DateTime);
                     }
-                    DataColumn datecolumn = new DataColumn(colFields[i], colType)
+                    DataColumn datecolumn = new DataColumn(colNames[i], colType)
                     {
                         AllowDBNull = true
                     };
                     csvData.Columns.Add(datecolumn);
                 }
-                // TODO: split code ra
-
+                int page = 1;
+                int csvRow = 0;
+                int sqlServerRow = 0;
+                // Set row data
                 while (!csvReader.EndOfData)
                 {
-                    csvHasDataRow = true;
-                    string[] fieldData = csvReader.ReadFields();
-                    object[] fieldDataParsed = new object[fieldData.Length];
+                    csvRow++;
+                    string[] cellData = csvReader.ReadFields();
+                    object[] cellDataParsed = new object[cellData.Length];
                     //Making empty value as null
-                    for (int i = 0; i < fieldData.Length; i++)
+                    for (int i = 0; i < cellData.Length; i++)
                     {
-                        if (fieldData[i] == "")
+                        if (cellData[i] == "")
                         {
-                            fieldDataParsed[i] = null;
+                            cellDataParsed[i] = null;
                         }
-                        else if (listInt.Contains(colTypes[i], StringComparer.OrdinalIgnoreCase))
+                        else if (listInt.Contains(colDataTypes[i], StringComparer.OrdinalIgnoreCase))
                         {
-                            if (int.TryParse(fieldData[i], out int parsed))
+                            if (int.TryParse(cellData[i], out int parsed))
                             {
-                                fieldDataParsed[i] = parsed;
+                                cellDataParsed[i] = parsed;
                             }
                         }
-                        else if (listDecimal.Contains(colTypes[i], StringComparer.OrdinalIgnoreCase))
+                        else if (listDecimal.Contains(colDataTypes[i], StringComparer.OrdinalIgnoreCase))
                         {
-                            if (decimal.TryParse(fieldData[i], out decimal parsed))
+                            if (decimal.TryParse(cellData[i], NumberStyles.Any, new NumberFormatInfo() { NumberDecimalSeparator = "." }, out decimal parsed))
                             {
-                                fieldDataParsed[i] = parsed;
+                                cellDataParsed[i] = parsed;
                             }
                         }
-                        else if (listDate.Contains(colTypes[i], StringComparer.OrdinalIgnoreCase))
+                        else if (listDate.Contains(colDataTypes[i], StringComparer.OrdinalIgnoreCase))
                         {
-                            if (DateTime.TryParse(fieldData[i], out DateTime parsed))
+                            if (DateTime.TryParse(cellData[i], out DateTime parsed))
                             {
-                                fieldDataParsed[i] = parsed;
+                                cellDataParsed[i] = parsed;
                             }
                         }
-                        else if (listStr.Contains(colTypes[i], StringComparer.OrdinalIgnoreCase))
+                        else if (listStr.Contains(colDataTypes[i], StringComparer.OrdinalIgnoreCase))
                         {
-                            fieldDataParsed[i] = fieldData[i];
+                            cellDataParsed[i] = cellData[i];
                         }
                     }
-
-                    csvData.Rows.Add(fieldDataParsed);
+                    csvData.Rows.Add(cellDataParsed);
                     // Compare with sql server
                     if (csvData.Rows.Count == bashSize || csvReader.EndOfData)
                     {
-                        DataTable DBServer = DBSqlServerUtils.GetDataTableFromSqlServer(connSqlSv,tableName, csvData);
-                        bool isDataOk = CompareDataTable(csvData, DBServer, tableName, csvMaxLength, sqlServerMaxLength);
-                        if (!isDataOk) return false;
+                        DataTable DBServer = DBSqlServerUtils.GetDataTablePaging(tbl.TableName, colNames.ToArray(), page, bashSize);
+                        sqlServerRow += DBServer.Rows.Count;
+                        CompareTableMySqlAndSqlServer(csvData, DBServer, tbl);
                         csvData.Rows.Clear();
+                        page++;
                     }
-
                 }
-                // Compare with sql server
-                if (!csvHasDataRow)
+                if (csvRow > sqlServerRow)
                 {
-                    DataTable DBServer = DBSqlServerUtils.GetDataTableFromSqlServer(connSqlSv,tableName, csvData);
-                    bool isDataOk = CompareDataTable(csvData, DBServer, tableName, csvMaxLength, sqlServerMaxLength);
-                    if (!isDataOk) return false;
+                    tbl.Problems.Add($"Missing {csvRow - sqlServerRow} records");
                     csvData.Rows.Clear();
+                    return false;
                 }
             }
             return true;
+        }
+
+        private static DataTable ConvertValueType(DataTable dataTable)
+        {
+            List<Type> listInt = new List<Type> { typeof(sbyte), typeof(int), typeof(short), typeof(long) };
+            List<Type> listDecimal = new List<Type> { typeof(double), typeof(float), typeof(decimal) };
+            List<Type> listDate = new List<Type> { typeof(DateTime) };
+            DataTable dtClone = dataTable.Clone();
+            for (int i = 0; i < dtClone.Columns.Count; i++)
+            {
+                Type colType = typeof(string);
+                if (listInt.Contains(dtClone.Columns[i].DataType))
+                {
+                    colType = typeof(long);
+                }
+                else if (listDecimal.Contains(dtClone.Columns[i].DataType))
+                {
+                    colType = typeof(decimal);
+                }
+                else if (listDate.Contains(dtClone.Columns[i].DataType))
+                {
+                    colType = typeof(DateTime);
+                }
+                dtClone.Columns[i].DataType = colType;
+            }
+            foreach (DataRow dr in dataTable.Rows)
+            {
+                dtClone.ImportRow(dr);
+            }
+            return dtClone;
+        }
+        private static IEnumerable<DataRow> ValidTableFieldEqual(DataTable mySqlDatatable, DataTable sqlServerDatatable)
+        {
+
+            var dataset1 = ConvertValueType(mySqlDatatable);
+            var dataset2 = ConvertValueType(sqlServerDatatable);
+            var differences =
+                dataset1.AsEnumerable().Except(dataset2.AsEnumerable(),
+                                            DataRowComparer.Default);
+            return differences;
+        }
+        private static TableDB ValidationByTable(TableDB tbl)
+        {
+            string tblName = tbl.TableName;
+            // validate header field
+            try
+            {
+                var differenceheaders = ValidTableFieldEqual(DBMySQLUtils.GetDataType(tblName), DBSqlServerUtils.GetDataType(tblName));
+                if (differenceheaders.Any())
+                {
+                    tbl.Problems.Add($"Missing table header: {string.Join(",", differenceheaders.Select(row => row.ItemArray[0].ToString()))}");
+                }
+                tbl.DataTableMySql = DBMySQLUtils.DataTableInMySql(tblName);
+                tbl.DataTableSqlServer = DBSqlServerUtils.DataTableInSqlServer(tblName);
+                if (tbl.DataTableMySql.Rows.Count > tbl.DataTableSqlServer.Rows.Count)
+                {
+                    var msg = $"Missing {tbl.DataTableMySql.Rows.Count - tbl.DataTableSqlServer.Rows.Count} records";
+                    tbl.Problems.Add(msg);
+                }
+                ValidateTableData(tbl.DataTableMySql, tbl.DataTableSqlServer, tbl);
+            }
+            catch (SqlException e)
+            {
+                if (e.Number == 208)
+                {
+                    tbl.Problems.Clear();
+                    tbl.Problems.Add("Table is not found in Sql Server");
+                }
+            }
+            catch (Exception e)
+            {
+                //tbl.Problems.Add(e.Message);
+            }
+            return tbl;
+        }
+
+        public static void MainMenu()
+        {
+            bool isCustomInput = false;
+            bool hideMenu = false;
+            int subMenu = 0;
+            string selected = "m";
+            while (!hideMenu)
+            {
+                isCustomInput = false;
+                Console.Clear();
+                if (selected == "q") break;
+                if (selected == "m")
+                {
+                    subMenu = 0;
+                    Console.WriteLine("1) Lists tables in MySql database");
+                    Console.WriteLine("2) Lists tables in Sql Server database");
+                    Console.WriteLine("3) Validate all tables in database - using query");
+                    Console.WriteLine("4) Validate selection tables in database - using query");
+                    Console.WriteLine("5) Export Mysql database to csv file");
+                    Console.WriteLine("6) Validate all tables in database - using csv file");
+                }
+                else if (subMenu == 0 && selected == "1")
+                {
+                    subMenu = 1;
+                    var listTbl = DBMySQLUtils.GetListTable();
+                    PrintLine();
+                    PrintRow("Lists tables in MySql database");
+                    PrintLine();
+                    PrintRow("Table name", "Number of records");
+                    PrintLine();
+                    foreach (var tbl in listTbl)
+                    {
+                        PrintRow(tbl.Key, tbl.Value.ToString());
+                    }
+                }
+                else if (subMenu == 0 && selected == "2")
+                {
+                    subMenu = 2;
+                    var listTblSqlServer = DBSqlServerUtils.GetListTable();
+                    PrintLine();
+                    PrintRow("Lists tables in Sql Server database");
+                    PrintLine();
+                    PrintRow("Table name", "Number of records");
+                    PrintLine();
+                    foreach (var tbl in listTblSqlServer)
+                    {
+                        PrintRow(tbl.Key, tbl.Value.ToString());
+                    }
+                }
+                else if (subMenu == 0 && selected == "3")
+                {
+                    subMenu = 3;
+                    var listTblMySql = DBMySQLUtils.GetListTable()
+                        .Select(item => new TableDB
+                        {
+                            TableName = item.Key,
+                            RecordCount = item.Value
+                        }).ToList();
+
+                    var listTblSqlServer = DBSqlServerUtils.GetListTable();
+                    PrintLine();
+                    PrintRow("Validation Summary Report");
+                    PrintLine();
+                    PrintRow("", "MySql", "Sql Server");
+                    PrintLine();
+                    foreach (var tbl in listTblMySql)
+                    {
+                        ValidationByTable(tbl);
+                    }
+                    PrintRow("Number of tables Checked", listTblMySql.Count().ToString(), listTblSqlServer.Count().ToString());
+                    PrintLine();
+                    var listTblPass = listTblMySql.Where(tbl => tbl.Problems.Count() == 0);
+                    var listTblFail = listTblMySql.Where(tbl => !listTblPass.Any(item => item.TableName == tbl.TableName));
+                    PrintRow("Table Passed", listTblPass.Count().ToString(), "");
+                    PrintLine();
+                    PrintRow("Table Failed", listTblFail.Count().ToString(), "");
+                    foreach (var tblFailed in listTblFail.ToList())
+                    {
+                        for (int index = 0; index < tblFailed.Problems.Count(); index++)
+                        {
+                            var problem = tblFailed.Problems[index];
+                            if (index == 0)
+                                PrintRowRight("", tblFailed.TableName, "- " + problem);
+                            else
+                                PrintRowRight("", "", "- " + problem);
+                        }
+                    }
+                    PrintLine();
+                }
+                else if (subMenu == 0 && selected == "4")
+                {
+                    subMenu = 4;
+                    var listTbl = DBMySQLUtils.GetListTable();
+                    PrintRow("Validate table theo lựa chọn");
+                    PrintLine();
+                    PrintRow("Danh sách table trong Mysql");
+                    PrintLine();
+                    PrintRow("#", "table", "Number of Records");
+                    PrintLine();
+                    for (int index = 0; index < listTbl.Count(); index++)
+                    {
+                        var tbl = listTbl.ElementAt(index);
+                        PrintRow(index.ToString(), tbl.Key, tbl.Value.ToString());
+                    }
+                    Console.WriteLine("Có 2 cách nhập: ");
+                    Console.WriteLine(" - Chọn khoảng table 1-10: 1-10 hoặc 1-5 5-10");
+                    Console.WriteLine(" - Chọn từng table 1,2,3: 1,2,3 hoặc 1 2 3");
+                }
+                else if (subMenu == 4)
+                {
+                    var listTbl = DBMySQLUtils.GetListTable()
+                       .Select((item, index) => new TableDB
+                       {
+                           TableName = item.Key,
+                           RecordCount = item.Value,
+                           Index = index
+                       }).ToList();
+                    if (new Regex("(\\d-\\d \\d-\\d)|(\\d-\\d)").IsMatch(selected))
+                    {
+                        var listSelected = selected.Split(' ').ToList();
+                        var selectedTbl = new List<TableDB>();
+                        foreach (var item in listSelected)
+                        {
+                            var selectedTables = item.Split('-').Select(int.Parse).ToList();
+                            if (selectedTables[0] < 0 || selectedTables[0] < selectedTables[1] || selectedTables[1] > listTbl.Count())
+                            {
+                                selected = "4";
+                            }
+                            selectedTbl.AddRange(listTbl.Where(e => e.Index >= selectedTables[0] && e.Index <= selectedTables[1]).ToList());
+                        }
+                        listTbl = selectedTbl.Distinct().ToList();
+                    }
+                    else if (new Regex("(\\d \\d)|(\\d,\\d)").IsMatch(selected))
+                    {
+                        var selectedTables = selected.Split(' ', ',').Select(int.Parse).Distinct().ToList();
+                        if (selectedTables.Any(e => e < 0) || selectedTables.Any(e => e > listTbl.Count()))
+                        {
+                            selected = "4";
+                        }
+                        listTbl = listTbl.Where(item => selectedTables.Contains(item.Index)).ToList();
+                    }
+                    else
+                    {
+                        selected = "4";
+                        continue;
+                    }
+                    PrintLine();
+                    PrintRow("Validation summary report for selection tables");
+                    PrintLine();
+                    PrintRow("Table", "Checked Records", "Status", "Error Message");
+                    PrintLine();
+                    foreach (var tbl in listTbl)
+                    {
+                        ValidationByTable(tbl);
+                        if (tbl.Problems.Count() > 0)
+                            for (int index = 0; index < tbl.Problems.Count(); index++)
+                            {
+                                var problem = tbl.Problems[index];
+                                if (index == 0)
+                                    PrintRow(tbl.TableName, tbl.RecordCount.ToString(), "Failed", problem);
+                                else
+                                    PrintRowRight("", "", "", problem);
+                            }
+                        else
+                        {
+                            PrintRow(tbl.TableName, tbl.RecordCount.ToString(), "Passed", "");
+                        }
+                        PrintLine();
+                    }
+                }
+                else if (subMenu == 0 && selected == "5")
+                {
+                    PrintRow("Export Mysql database to csv file");
+                    PrintLine();
+                    subMenu = 5;
+                    var listTbl = DBMySQLUtils.GetListTable()
+                       .Select((item, index) => new TableDB
+                       {
+                           TableName = item.Key,
+                           RecordCount = item.Value,
+                           Index = index
+                       }).ToList();
+                    int exportSuccessCount = 0;
+                    foreach (var tbl in listTbl)
+                    {
+                        try
+                        {
+                            DBMySQLUtils.ExportTableMetadataCsv(tbl.TableName);
+                            DBMySQLUtils.ExportTableDataCsv(tbl.TableName);
+                            PrintRow($"{tbl.TableName}", "Done");
+                            exportSuccessCount++;
+                        }
+                        catch (Exception e)
+                        {
+                            PrintRow(tbl.TableName, e.Message);
+                        }
+                        PrintLine();
+                    }
+                    if (exportSuccessCount > 0)
+                        Console.WriteLine($"{exportSuccessCount} tables exported");
+                    else
+                        Console.WriteLine($"Export failed.");
+                    Console.WriteLine($"File path: {DBMySQLUtils.GetExportFolder()}");
+                }
+                else if (subMenu == 6)
+                {
+                    var listTblMySql = DBMySQLUtils.GetListTable()
+                     .Select((item, index) => new TableDB
+                     {
+                         TableName = item.Key,
+                         RecordCount = item.Value,
+                         Index = index
+                     }).ToList();
+                    var listTblSqlServer = DBSqlServerUtils.GetListTable();
+                    PrintRow("Validation Summary Report");
+                    PrintLine();
+                    PrintRow("", "MySql", "Sql Server");
+                    PrintLine();
+                    foreach (var tbl in listTblMySql)
+                    {
+                        try
+                        {
+                            var tableDataCsvPath = Path.Combine(selected, $"{tbl.TableName}.csv");
+                            var tableMetadataCsvPath = Path.Combine(selected, $"{tbl.TableName}_metadata.csv");
+                            ValidDataFromCsvAndSqlServer(tableDataCsvPath, tableMetadataCsvPath, tbl);
+                        }
+                        catch (SqlException e)
+                        {
+                            if (e.Number == 208)
+                                tbl.Problems.Add("Table is not found in Sql Server");
+                        }
+                        catch (Exception)
+                        {
+                        }
+                    }
+                    PrintRow("Number of tables Checked", listTblMySql.Count().ToString(), listTblSqlServer.Count().ToString());
+                    PrintLine();
+                    var listTblPass = listTblMySql.Where(tbl => tbl.Problems.Count() == 0);
+                    var listTblFail = listTblMySql.Where(tbl => !listTblPass.Any(item => item.TableName == tbl.TableName));
+                    PrintRow("Table Passed", listTblPass.Count().ToString(), "");
+                    PrintLine();
+                    PrintRow("Table Failed", listTblFail.Count().ToString(), "");
+                    foreach (var tblFailed in listTblFail.ToList())
+                    {
+                        for (int index = 0; index < tblFailed.Problems.Count(); index++)
+                        {
+                            var problem = tblFailed.Problems[index];
+                            if (index == 0)
+                                PrintRowRight("", tblFailed.TableName, "- " + problem);
+                            else
+                                PrintRowRight("", "", "- " + problem);
+                        }
+                    }
+                    PrintLine();
+                }
+                else if (subMenu == 0 && selected == "6")
+                {
+                    isCustomInput = true;
+                    string path = "";
+                    Console.WriteLine("m) Menu");
+                    Console.WriteLine("q) Quit");
+                    while (true)
+                    {
+                        Console.Write("Enter exported csv path (Example: C:/mysql/excel): ");
+                        var input = Console.ReadLine().Trim().ToLower();
+                        if (input == "m" || input == "q")
+                        {
+                            selected = input;
+                            subMenu = 0;
+                            break;
+                        }
+                        path = Path.GetFullPath(input);
+                        if (Directory.Exists(path))
+                        {
+                            selected = input;
+                            subMenu = 6;
+                            break;
+                        }
+                        else
+                        {
+                            Console.WriteLine("Path is not found");
+                        }
+                    }
+                }
+                else
+                {
+                    subMenu = 0;
+                    selected = "m";
+                    continue;
+                }
+                Console.WriteLine("m) Menu");
+                Console.WriteLine("q) Quit");
+                if (!isCustomInput)
+                {
+                    Console.Write("\r\nEnter: ");
+                    selected = Console.ReadLine().Trim().ToLower();
+                }
+            }
+        }
+
+        static void PrintLine()
+        {
+            Console.WriteLine(new string('-', tableWidth));
+        }
+        static void PrintRow(params string[] columns)
+        {
+            int width = (tableWidth - columns.Length) / columns.Length;
+            string row = "|";
+
+            foreach (string column in columns)
+            {
+                row += AlignCentre(column, width) + "|";
+            }
+
+            Console.WriteLine(row);
+        }
+        static void PrintRowRight(params string[] columns)
+        {
+            int width = (tableWidth - columns.Length) / columns.Length;
+            string row = "|";
+
+            foreach (string column in columns)
+            {
+                row += AlignRight(column, width) + "|";
+            }
+
+            Console.WriteLine(row);
+        }
+        static string AlignCentre(string text, int width)
+        {
+            text = text.Length > width ? text.Substring(0, width - 3) + "..." : text;
+
+            if (string.IsNullOrEmpty(text))
+            {
+                return new string(' ', width);
+            }
+            else
+            {
+                return text.PadRight(width - (width - text.Length) / 2).PadLeft(width);
+            }
+        }
+        static string AlignRight(string text, int width)
+        {
+            text = text.Length > width ? text.Substring(0, width - 3) + "..." : text;
+
+            if (string.IsNullOrEmpty(text))
+            {
+                return new string(' ', width);
+            }
+            else
+            {
+                return text.PadRight(width).PadLeft(0);
+            }
         }
     }
 }

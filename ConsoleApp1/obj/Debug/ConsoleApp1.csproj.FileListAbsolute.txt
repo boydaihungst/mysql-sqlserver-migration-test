@@ -24,3 +24,16 @@ C:\Users\Hoang\source\repos\ValidSQL\ConsoleApp1\obj\Debug\ConsoleApp1.csproj.Co
 C:\Users\Hoang\source\repos\ValidSQL\ConsoleApp1\obj\Debug\ConsoleApp1.csproj.CopyComplete
 C:\Users\Hoang\source\repos\ValidSQL\ConsoleApp1\obj\Debug\ConsoleApp1.exe
 C:\Users\Hoang\source\repos\ValidSQL\ConsoleApp1\obj\Debug\ConsoleApp1.pdb
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\obj\Debug\ConsoleApp1.csprojAssemblyReference.cache
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\obj\Debug\ConsoleApp1.csproj.CoreCompileInputs.cache
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\obj\Debug\ConsoleApp1.exe
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\obj\Debug\ConsoleApp1.pdb
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\bin\Debug\ConsoleApp1.exe.config
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\bin\Debug\ConsoleApp1.exe
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\bin\Debug\ConsoleApp1.pdb
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\bin\Debug\MySql.Data.dll
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\bin\Debug\Google.Protobuf.dll
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\bin\Debug\BouncyCastle.Crypto.dll
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\bin\Debug\Renci.SshNet.dll
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\bin\Debug\MySql.Data.xml
+C:\Users\HuyHoang\Documents\Github\valid-data-migrated-mysql-sqlserver.git\ConsoleApp1\obj\Debug\ConsoleApp1.csproj.CopyComplete
