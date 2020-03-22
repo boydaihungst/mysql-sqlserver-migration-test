@@ -2,7 +2,7 @@
 using System.IO;
 using System.Text;
 
-namespace ConsoleApp1
+namespace ValidateMigratedMysqlToSqlServer
 {
     class Utilities
     {

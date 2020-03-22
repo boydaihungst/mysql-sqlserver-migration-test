@@ -12,8 +12,8 @@ namespace ConsoleApp1.Model
         public int Index { get; set; }
         public string TableName { get; set; }
         public int RecordCount { get; set; }
-        public DataTable DataTableMySql { get; set; }
-        public DataTable DataTableSqlServer { get; set; }
+        //public DataTable DataTableMySql { get; set; }
+        //public DataTable DataTableSqlServer { get; set; }
         public List<string> Problems { get; set; } = new List<string>();
     }
 }

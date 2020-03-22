@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.28307.902
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConsoleApp1", "ConsoleApp1\ConsoleApp1.csproj", "{202FFA76-8C91-4EB9-9C17-D03499093030}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ValidateMigratedMysqlToSqlServer", "ConsoleApp1\ValidateMigratedMysqlToSqlServer.csproj", "{202FFA76-8C91-4EB9-9C17-D03499093030}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -5,7 +5,7 @@ using System.Configuration;
 using System.Data;
 using System.Data.Common;
 
-namespace Db.SqlConn
+namespace ValidateMigratedMysqlToSqlServer.DB
 {
     class DBMySQLUtils
     {
@@ -17,13 +17,24 @@ namespace Db.SqlConn
 
         public static MySqlConnection GetDBConnection()
         {
-            // Connection String.
-            string connString = ConfigurationManager.ConnectionStrings["MySqlContext"].ConnectionString;
+            MySqlConnection conn = null;
+            try
+            {
+                // Connection String.
+                string connString = ConfigurationManager.ConnectionStrings["MySqlContext"].ConnectionString;
 
-            MySqlConnection conn = new MySqlConnection(connString);
+                conn = new MySqlConnection(connString);
 
-            conn.Open();
-            Console.Title = $"Database: {conn.Database}";
+                conn.Open();
+                Console.Title = $"Database: {conn.Database}";
+            }
+            catch (Exception)
+            {
+                Console.WriteLine($"Can't open connection to My Sql");
+                Console.WriteLine($"Press any key to stop");
+                Console.ReadKey();
+                Environment.Exit(0);
+            }
             return conn;
         }
         public static string GetExportFolder()
@@ -223,14 +234,15 @@ namespace Db.SqlConn
             }
             return tblData;
         }
-        public static DataTable DataTableInMySql(string tableName)
+        public static DataTable DataTableInMySql(string tableName, int page, int pageSize)
         {
             DataTable tblData = new DataTable(tableName);
             try
             {
                 using (MySqlConnection conn = GetDBConnection())
                 {
-                    string sql = $"SELECT *  FROM {tableName} ORDER BY 1";
+                    string sql = $"SELECT *  FROM {tableName} ORDER BY 1" +
+                        $" LIMIT {(page - 1) * pageSize}, {pageSize};";
                     using (MySqlCommand cmd = new MySqlCommand(sql, conn))
                     {
                         using (DbDataReader reader = cmd.ExecuteReader())

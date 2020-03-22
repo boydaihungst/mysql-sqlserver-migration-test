@@ -1,6 +1,4 @@
-using ConsoleApp1.DB;
 using ConsoleApp1.Model;
-using Db.SqlConn;
 using Microsoft.VisualBasic.FileIO;
 using System;
 using System.Collections.Generic;
@@ -12,8 +10,9 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using ValidateMigratedMysqlToSqlServer.DB;
 
-namespace ConsoleApp1
+namespace ValidateMigratedMysqlToSqlServer
 {
     class Program
     {
@@ -47,9 +46,38 @@ namespace ConsoleApp1
             }
             return isOk;
         }
+        /// <summary>
+        /// Validate table data
+        /// </summary>
+        /// <param name="mySqlDatatable"></param>
+        /// <param name="sqlServerDatatable"></param>
+        /// <param name="tbl"></param>
+        /// <returns></returns>
         private static bool ValidateTableData(DataTable mySqlDatatable, DataTable sqlServerDatatable, TableDB tbl)
         {
             var isOk = true;
+            // Compare data type 
+            for (int i = 0; i < mySqlDatatable.Columns.Count; i++)
+            {
+                try
+                {
+                    var mySqlCellVal = mySqlDatatable.Columns[i];
+                    var sqlServerCellVal = sqlServerDatatable.Columns[i];
+                    if (mySqlCellVal.DataType != sqlServerCellVal.DataType)
+                    {
+                        throw new ArrayTypeMismatchException(mySqlDatatable.Columns[i].ColumnName);
+                    }
+                }
+                catch (Exception e)
+                {
+                    if (e is ArrayTypeMismatchException)
+                    {
+                        tbl.Problems.Add($"Field {e.Message} type not match");
+                    }
+                    tbl.Problems = tbl.Problems.Distinct().ToList();
+                    isOk = false;
+                }
+            }
             //foreach (DataRow row in mySqlDatatable.Rows)
             for (int i = 0; i < mySqlDatatable.Rows.Count; i++)
             {
@@ -57,24 +85,41 @@ namespace ConsoleApp1
                 {
                     foreach (DataColumn col in mySqlDatatable.Columns)
                     {
-                        var mySqlCellVal = mySqlDatatable.Rows[i][col.ColumnName].ToString();
-                        var sqlServerCellVal = sqlServerDatatable.Rows[i][col.ColumnName].ToString();
-                        if (mySqlCellVal != sqlServerCellVal)
+                        var mySqlCellVal = mySqlDatatable.Rows[i][col.ColumnName];
+                        var sqlServerCellVal = sqlServerDatatable.Rows[i][col.ColumnName];
+                        if (mySqlCellVal.GetType() != sqlServerCellVal.GetType())
+                        {
+                            throw new ArrayTypeMismatchException(col.ColumnName);
+                        }
+                        if (mySqlCellVal.ToString() != sqlServerCellVal.ToString())
                         {
                             throw new InvalidCompareException();
                         }
                     }
                 }
-                catch (Exception)
+                catch (Exception e)
                 {
-                    tbl.Problems.Add($"Data is not matching");
+                    if (e is InvalidCompareException)
+                    {
+                        tbl.Problems.Add($"Data is not matching");
+                    }
+                    else if (e is ArrayTypeMismatchException)
+                    {
+                        tbl.Problems.Add($"Field {e.Message} type not match");
+                    }
                     tbl.Problems = tbl.Problems.Distinct().ToList();
                     isOk = false;
                 }
             }
             return isOk;
         }
-        // excel
+        /// <summary>
+        /// Compare datatable mysql and tabledata sqlserver 
+        /// </summary>
+        /// <param name="mySqlDatatable"></param>
+        /// <param name="sqlServerDatatable"></param>
+        /// <param name="tbl">Table to compare</param>
+        /// <returns></returns>
         private static bool CompareTableMySqlAndSqlServer(DataTable mySqlDatatable, DataTable sqlServerDatatable, TableDB tbl)
         {
             var dataset1 = ConvertValueType(mySqlDatatable);
@@ -84,7 +129,13 @@ namespace ConsoleApp1
             isOk = ValidateTableData(dataset1, dataset2, tbl);
             return isOk;
         }
-        // excel
+        /// <summary>
+        /// Read excel file -> compare with sql server. Using paging for each table query
+        /// </summary>
+        /// <param name="tableDataCsvPath">Csv table data file path</param>
+        /// <param name="tableMetadataCsvPath">Csv table metadata file path</param>
+        /// <param name="tbl">Table to compare</param>
+        /// <returns></returns>
         private static bool ValidDataFromCsvAndSqlServer(string tableDataCsvPath, string tableMetadataCsvPath, TableDB tbl)
         {
             int bashSize = int.Parse(ConfigurationManager.AppSettings["BashSize"]);
@@ -197,10 +248,18 @@ namespace ConsoleApp1
                     csvData.Rows.Clear();
                     return false;
                 }
+                else if (csvRow <= 0)
+                {
+                    DataTable DBServer = DBSqlServerUtils.GetDataTablePaging(tbl.TableName, colNames.ToArray(), page, bashSize);
+                    CompareTableMySqlAndSqlServer(csvData, DBServer, tbl);
+                    csvData.Rows.Clear();
+                }
             }
             return true;
         }
-
+        /// <summary>
+        /// Convert to match object type (mysql and sql server)
+        /// </summary>
         private static DataTable ConvertValueType(DataTable dataTable)
         {
             List<Type> listInt = new List<Type> { typeof(sbyte), typeof(int), typeof(short), typeof(long) };
@@ -230,35 +289,23 @@ namespace ConsoleApp1
             }
             return dtClone;
         }
-        private static IEnumerable<DataRow> ValidTableFieldEqual(DataTable mySqlDatatable, DataTable sqlServerDatatable)
-        {
 
-            var dataset1 = ConvertValueType(mySqlDatatable);
-            var dataset2 = ConvertValueType(sqlServerDatatable);
-            var differences =
-                dataset1.AsEnumerable().Except(dataset2.AsEnumerable(),
-                                            DataRowComparer.Default);
-            return differences;
-        }
+        /// <summary>
+        /// Compare table to table
+        /// </summary>
         private static TableDB ValidationByTable(TableDB tbl)
         {
             string tblName = tbl.TableName;
             // validate header field
             try
             {
-                var differenceheaders = ValidTableFieldEqual(DBMySQLUtils.GetDataType(tblName), DBSqlServerUtils.GetDataType(tblName));
-                if (differenceheaders.Any())
+                int bashSize = int.Parse(ConfigurationManager.AppSettings["BashSize"]);
+                for (int i = 0; i < Math.Ceiling((decimal)tbl.RecordCount / bashSize); i++)
                 {
-                    tbl.Problems.Add($"Missing table header: {string.Join(",", differenceheaders.Select(row => row.ItemArray[0].ToString()))}");
+                    var dataTableMySql = DBMySQLUtils.DataTableInMySql(tblName, i + 1, bashSize);
+                    var dataTableSqlServer = DBSqlServerUtils.DataTableInSqlServer(tblName, i + 1, bashSize);
+                    CompareTableMySqlAndSqlServer(dataTableMySql, dataTableSqlServer, tbl);
                 }
-                tbl.DataTableMySql = DBMySQLUtils.DataTableInMySql(tblName);
-                tbl.DataTableSqlServer = DBSqlServerUtils.DataTableInSqlServer(tblName);
-                if (tbl.DataTableMySql.Rows.Count > tbl.DataTableSqlServer.Rows.Count)
-                {
-                    var msg = $"Missing {tbl.DataTableMySql.Rows.Count - tbl.DataTableSqlServer.Rows.Count} records";
-                    tbl.Problems.Add(msg);
-                }
-                ValidateTableData(tbl.DataTableMySql, tbl.DataTableSqlServer, tbl);
             }
             catch (SqlException e)
             {
@@ -275,6 +322,9 @@ namespace ConsoleApp1
             return tbl;
         }
 
+        /// <summary>
+        /// Main menu
+        /// </summary>
         public static void MainMenu()
         {
             bool isCustomInput = false;
@@ -357,7 +407,7 @@ namespace ConsoleApp1
                         {
                             var problem = tblFailed.Problems[index];
                             if (index == 0)
-                                PrintRowRight("", tblFailed.TableName, "- " + problem);
+                                PrintRow("", tblFailed.TableName, "- " + problem);
                             else
                                 PrintRowRight("", "", "- " + problem);
                         }
@@ -379,9 +429,11 @@ namespace ConsoleApp1
                         var tbl = listTbl.ElementAt(index);
                         PrintRow(index.ToString(), tbl.Key, tbl.Value.ToString());
                     }
-                    Console.WriteLine("Có 2 cách nhập: ");
-                    Console.WriteLine(" - Chọn khoảng table 1-10: 1-10 hoặc 1-5 5-10");
-                    Console.WriteLine(" - Chọn từng table 1,2,3: 1,2,3 hoặc 1 2 3");
+                    Console.WriteLine("Có 3 cách nhập: ");
+
+                    Console.WriteLine(" - Chọn tất cả table: a hoặc A hoặc All");
+                    Console.WriteLine(" - Chọn khoảng table: 1-10 hoặc 1-5 5-10");
+                    Console.WriteLine(" - Chọn từng table: 1,2,3 hoặc 1 2 3");
                 }
                 else if (subMenu == 4)
                 {
@@ -407,7 +459,7 @@ namespace ConsoleApp1
                         }
                         listTbl = selectedTbl.Distinct().ToList();
                     }
-                    else if (new Regex("(\\d \\d)|(\\d,\\d)").IsMatch(selected))
+                    else if (new Regex("(\\d)|(\\d \\d)|(\\d,\\d)").IsMatch(selected))
                     {
                         var selectedTables = selected.Split(' ', ',').Select(int.Parse).Distinct().ToList();
                         if (selectedTables.Any(e => e < 0) || selectedTables.Any(e => e > listTbl.Count()))
@@ -416,8 +468,13 @@ namespace ConsoleApp1
                         }
                         listTbl = listTbl.Where(item => selectedTables.Contains(item.Index)).ToList();
                     }
+                    else if (new string[] { "a", "all" }.Contains(selected.ToLower()))
+                    {
+
+                    }
                     else
                     {
+                        subMenu = 0;
                         selected = "4";
                         continue;
                     }
@@ -501,16 +558,23 @@ namespace ConsoleApp1
                             var tableMetadataCsvPath = Path.Combine(selected, $"{tbl.TableName}_metadata.csv");
                             ValidDataFromCsvAndSqlServer(tableDataCsvPath, tableMetadataCsvPath, tbl);
                         }
-                        catch (SqlException e)
+                        catch (Exception e)
                         {
-                            if (e.Number == 208)
-                                tbl.Problems.Add("Table is not found in Sql Server");
-                        }
-                        catch (Exception)
-                        {
+                            if (e is SqlException)
+                            {
+                                if ((e as SqlException).Number == 208)
+                                    tbl.Problems.Add("Table not exist in Sql Server");
+                                else if ((e as SqlException).Number == 207)
+                                    tbl.Problems.Add(e.Message);
+                            }
+
+                            if (e is FileNotFoundException)
+                            {
+                                tbl.Problems.Add("Cant find csv file");
+                            }
                         }
                     }
-                    PrintRow("Number of tables Checked", listTblMySql.Count().ToString(), listTblSqlServer.Count().ToString());
+                    PrintRow("Number of tables Checked", listTblMySql.Count().ToString() + "", listTblMySql.Count().ToString() + "");
                     PrintLine();
                     var listTblPass = listTblMySql.Where(tbl => tbl.Problems.Count() == 0);
                     var listTblFail = listTblMySql.Where(tbl => !listTblPass.Any(item => item.TableName == tbl.TableName));
@@ -523,7 +587,7 @@ namespace ConsoleApp1
                         {
                             var problem = tblFailed.Problems[index];
                             if (index == 0)
-                                PrintRowRight("", tblFailed.TableName, "- " + problem);
+                                PrintRow("", tblFailed.TableName, "- " + problem);
                             else
                                 PrintRowRight("", "", "- " + problem);
                         }
@@ -575,10 +639,16 @@ namespace ConsoleApp1
             }
         }
 
+        /// <summary>
+        /// Print line --- command line UI
+        /// </summary>
         static void PrintLine()
         {
             Console.WriteLine(new string('-', tableWidth));
         }
+        /// <summary>
+        /// Print row --- command line UI
+        /// </summary>
         static void PrintRow(params string[] columns)
         {
             int width = (tableWidth - columns.Length) / columns.Length;
@@ -591,6 +661,9 @@ namespace ConsoleApp1
 
             Console.WriteLine(row);
         }
+        /// <summary>
+        /// Print row alight right --- command line UI
+        /// </summary>
         static void PrintRowRight(params string[] columns)
         {
             int width = (tableWidth - columns.Length) / columns.Length;
@@ -603,6 +676,9 @@ namespace ConsoleApp1
 
             Console.WriteLine(row);
         }
+        /// <summary>
+        /// Alight center --- command line UI
+        /// </summary>
         static string AlignCentre(string text, int width)
         {
             text = text.Length > width ? text.Substring(0, width - 3) + "..." : text;
@@ -616,6 +692,9 @@ namespace ConsoleApp1
                 return text.PadRight(width - (width - text.Length) / 2).PadLeft(width);
             }
         }
+        /// <summary>
+        /// Alight right --- command line UI
+        /// </summary>
         static string AlignRight(string text, int width)
         {
             text = text.Length > width ? text.Substring(0, width - 3) + "..." : text;
