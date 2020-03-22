@@ -6,16 +6,27 @@ using System.Data;
 using System.Data.Common;
 using System.Data.SqlClient;
 
-namespace ConsoleApp1.DB
+namespace ValidateMigratedMysqlToSqlServer.DB
 {
     class DBSqlServerUtils
     {
         public static SqlConnection GetDBConnection()
         {
-            string connString = ConfigurationManager.ConnectionStrings["SqlServerContext"].ConnectionString;
+            SqlConnection conn = null;
+            try
+            {
+                string connString = ConfigurationManager.ConnectionStrings["SqlServerContext"].ConnectionString;
 
-            SqlConnection conn = new SqlConnection(connString);
-            conn.Open();
+                conn = new SqlConnection(connString);
+                conn.Open();
+            }
+            catch (Exception)
+            {
+                Console.WriteLine($"Can't open connection to Sql Server");
+                Console.WriteLine($"Press any key to stop");
+                Console.ReadKey();
+                Environment.Exit(0);
+            }
             return conn;
         }
         public static int CountRecord(SqlConnection conn, string tableName)
@@ -75,7 +86,7 @@ namespace ConsoleApp1.DB
             }
             return tblNameList;
         }
-        public static DataTable DataTableInSqlServer(string tableName)
+        public static DataTable DataTableInSqlServer(string tableName, int page, int pageSize)
         {
             DataTable tblData = new DataTable(tableName);
             string schema = ConfigurationManager.AppSettings["SqlServerSchema"].ToString();
@@ -83,7 +94,8 @@ namespace ConsoleApp1.DB
             {
                 using (SqlConnection conn = GetDBConnection())
                 {
-                    string sql = $"SELECT *  FROM [{schema}].[{tableName}] ORDER BY 1 ";
+                    string sql = $"SELECT *  FROM [{schema}].[{tableName}]" +
+                        $" ORDER BY 1 OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY;";
                     using (SqlCommand cmd = new SqlCommand(sql, conn))
                     {
                         using (DbDataReader reader = cmd.ExecuteReader())
@@ -104,6 +116,10 @@ namespace ConsoleApp1.DB
         //public static DataTable GetDataTableFromSqlServer(string tableName, DataTable csvData)
         public static DataTable GetDataTablePaging(string tableName, string[] projectionField, int page, int pageSize)
         {
+            for (int i = 0; i < projectionField.Length; i++)
+            {
+                projectionField[i] = $"[{projectionField[i]}]";
+            }
             // Prepare sql statement
             string sql = $"SELECT {string.Join(",", projectionField)} FROM [{ConfigurationManager.AppSettings["SqlServerSchema"].ToString()}].[{tableName}]" +
                 $" ORDER BY(SELECT NULL) OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY;";
@@ -127,7 +143,7 @@ namespace ConsoleApp1.DB
             {
                 using (SqlConnection conn = GetDBConnection())
                 {
-                    string sql = $"SELECT COLUMN_NAME from INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableName}'  AND TABLE_SCHEMA = '{conn.Database}'  order BY 1";
+                    string sql = $"SELECT COLUMN_NAME from INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{tableName}'  AND TABLE_SCHEMA = '{conn.Database}' order BY 1";
                     using (SqlCommand cmd = new SqlCommand(sql, conn))
                     {
                         using (DbDataReader reader = cmd.ExecuteReader())
