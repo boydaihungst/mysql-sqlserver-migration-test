@@ -78,6 +78,11 @@ namespace ValidateMigratedMysqlToSqlServer
                     isOk = false;
                 }
             }
+            if (mySqlDatatable.Rows.Count > sqlServerDatatable.Rows.Count)
+            {
+                tbl.Problems.Add($"Missing {mySqlDatatable.Rows.Count - sqlServerDatatable.Rows.Count} records");
+                return false;
+            }
             //foreach (DataRow row in mySqlDatatable.Rows)
             for (int i = 0; i < mySqlDatatable.Rows.Count; i++)
             {
@@ -244,7 +249,7 @@ namespace ValidateMigratedMysqlToSqlServer
                 }
                 if (csvRow > sqlServerRow)
                 {
-                    tbl.Problems.Add($"Missing {csvRow - sqlServerRow} records");
+                    //tbl.Problems.Add($"Missing {csvRow - sqlServerRow} records");
                     csvData.Rows.Clear();
                     return false;
                 }
