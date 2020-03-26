@@ -1,5 +1,6 @@
 using ConsoleApp1.Model;
 using Microsoft.VisualBasic.FileIO;
+using MySql.Data.Types;
 using System;
 using System.Collections.Generic;
 using System.Configuration;
@@ -92,10 +93,6 @@ namespace ValidateMigratedMysqlToSqlServer
                     {
                         var mySqlCellVal = mySqlDatatable.Rows[i][col.ColumnName];
                         var sqlServerCellVal = sqlServerDatatable.Rows[i][col.ColumnName];
-                        if (mySqlCellVal.GetType() != sqlServerCellVal.GetType())
-                        {
-                            throw new ArrayTypeMismatchException(col.ColumnName);
-                        }
                         if (mySqlCellVal.ToString() != sqlServerCellVal.ToString())
                         {
                             throw new InvalidCompareException();
@@ -107,10 +104,6 @@ namespace ValidateMigratedMysqlToSqlServer
                     if (e is InvalidCompareException)
                     {
                         tbl.Problems.Add($"Data is not matching");
-                    }
-                    else if (e is ArrayTypeMismatchException)
-                    {
-                        tbl.Problems.Add($"Field {e.Message} type not match");
                     }
                     tbl.Problems = tbl.Problems.Distinct().ToList();
                     isOk = false;
@@ -267,30 +260,49 @@ namespace ValidateMigratedMysqlToSqlServer
         /// </summary>
         private static DataTable ConvertValueType(DataTable dataTable)
         {
-            List<Type> listInt = new List<Type> { typeof(sbyte), typeof(int), typeof(short), typeof(long) };
-            List<Type> listDecimal = new List<Type> { typeof(double), typeof(float), typeof(decimal) };
-            List<Type> listDate = new List<Type> { typeof(DateTime) };
             DataTable dtClone = dataTable.Clone();
-            for (int i = 0; i < dtClone.Columns.Count; i++)
+            try
             {
-                Type colType = typeof(string);
-                if (listInt.Contains(dtClone.Columns[i].DataType))
+                List<Type> listInt = new List<Type> { typeof(sbyte), typeof(int), typeof(short), typeof(long) };
+                List<Type> listDecimal = new List<Type> { typeof(double), typeof(float), typeof(decimal) };
+                List<Type> listDate = new List<Type> { typeof(DateTime), typeof(MySqlDateTime) };
+
+                for (int i = 0; i < dtClone.Columns.Count; i++)
                 {
-                    colType = typeof(long);
+                    Type colType = typeof(string);
+                    if (listInt.Contains(dtClone.Columns[i].DataType))
+                    {
+                        colType = typeof(long);
+                    }
+                    else if (listDecimal.Contains(dtClone.Columns[i].DataType))
+                    {
+                        colType = typeof(decimal);
+                    }
+                    else if (listDate.Contains(dtClone.Columns[i].DataType))
+                    {
+                        colType = typeof(DateTime);
+                    }
+                    dtClone.Columns[i].DataType = colType;
                 }
-                else if (listDecimal.Contains(dtClone.Columns[i].DataType))
+                
+                foreach (DataRow dr in dataTable.Rows)
                 {
-                    colType = typeof(decimal);
+                    foreach (DataColumn col in dtClone.Columns)
+                    {
+                        if(dr[col.ColumnName].GetType() == typeof(DateTime) &&
+                           dr[col.ColumnName].ToString() == DateTime.MinValue.ToString())
+                        {
+                            dataTable.Columns[col.ColumnName].AllowDBNull = true;
+                            col.AllowDBNull = true;
+                            dr[col.ColumnName] = DBNull.Value;
+                        }
+                    }
+                    dtClone.ImportRow(dr);
                 }
-                else if (listDate.Contains(dtClone.Columns[i].DataType))
-                {
-                    colType = typeof(DateTime);
-                }
-                dtClone.Columns[i].DataType = colType;
             }
-            foreach (DataRow dr in dataTable.Rows)
+            catch (Exception)
             {
-                dtClone.ImportRow(dr);
+
             }
             return dtClone;
         }
